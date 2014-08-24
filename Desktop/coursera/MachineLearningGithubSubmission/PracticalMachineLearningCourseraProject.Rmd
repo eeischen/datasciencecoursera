@@ -1,0 +1,92 @@
+# Predicting How Subjects Did Exercises
+
+## Synopsis
+
+In this report, we describe a model built to predict how subjects did various exercises.  This report also explains the use of cross validation, the expected out of sample error, and the choices made in building this model.
+
+## Data Processing
+
+The model uses activity monitoring data from http://groupware.les.inf.puc-rio.br/har
+We begin by downloading the training data, which we use to build the model and to estimate the error.  We also download the testing data, to which we applied our model; the model predicted all twenty cases in the testing set correctly (according to feedback from the submission page on Coursera).
+
+```{r loaddata, echo=TRUE, cache=TRUE}
+fileUrl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileUrl, destfile="pml-training.csv", method="curl")
+fileUrl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl, destfile="pml-testing.csv", method="curl")
+testing<-read.csv("pml-testing.csv")
+training<-read.csv("pml-training.csv")
+```
+
+## Machine Learning Algorithm, Cross Validation, and Estimation of Error
+
+In this section, we build a machine learning algorithm.  Then we use cross validation and estimate the error to evaluate the effectiveness of our model.
+
+First we download several packages that we will use in our analysis.
+```{r packages, echo=TRUE, cache=TRUE}
+library(caret)
+library(randomForest)
+library(psych)
+```
+
+### Selecting Predictors
+We partition our training data into a test set and a train set.  The train set contains 60 percent of the training data, and the test set contains the other 40 percent of the training data.
+```{r partitioning, echo=TRUE, cache=TRUE}
+inTrain<-createDataPartition(y=training$classe, p=0.6, list=FALSE)
+train<-training[inTrain,]
+test<-training[-inTrain,]
+```
+
+We next find columns of train that are filled primarily with empty quotes or no data, and we eliminate them.  The reason for eliminating them is that they will turn out to be poor predictors (since they contain no information for most rows of the data set).  As the output below shows, columns with at least one empty entry are about 98% empty.
+```{r trainsmaller, echo=TRUE, cache=TRUE}
+traindescribe<-describe(train)
+nrows<-nrow(train)
+unique(traindescribe$n)/nrows
+trainuse<-train[,traindescribe$n==nrows]
+numcols<-ncol(trainuse)
+blankcount<-rep(NA, numcols)
+for(i in 1:numcols){
+  blankcount[i]<-sum(trainuse[,i]=="")
+}
+unique(blankcount/nrows)
+trainuse2<-trainuse[,blankcount==0]
+```
+
+We determine which columns remain.
+```{r whichcols, echo=TRUE, cache=TRUE}
+names(trainuse2)
+```
+
+
+We now eliminate columns 1, 3, 4, 5, 6, and 7 since they are unrelated to the motions people took.  (We acknowledge the possibility that a subject's movement is time dependent, since their body might adapt to the exercises over time.  As we will see from our error estimate later in this report, though, we obtain a good model without the timestamp data.)  While a subject's name does not encode information about a specific exercise, we have left user_name in the data set to account for the possibility that differences in technique between users might cause differences in measurements.  (Since the test set is on the same set of subjects, this data is potentially relevant.)
+
+```{r trainuse3, echo=TRUE, cache=TRUE}
+trainuse3<-trainuse2[,append(c(2), 8:60)]
+```
+
+### Random Forest, Cross Validation, and Estimation of Error
+
+We use the randomForest funcion in R to build a random forest model.  randomForest constructs 500 different trees.  Each iteration uses a random subset of about two thirds of the data to construct a tree (and leaves out the remaining third of the data, which is used to test that particular tree).  Thus the algorithm performs cross validation internally.  Using these 500 iterations, the algorithm computes an out of bag (oob) error estimate.^[I found the following reference helpful for understanding randomForest: http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm]
+
+```{r randomforestmethod, echo=TRUE, cache=TRUE}
+rforest<-randomForest(classe~., data=trainuse3)
+rforest
+plot(rforest)
+```
+From the output directly above, we see that the classification error is under 1.25% for each class.  The confusion matrix also illustrates the high accuracy of this model.  The out of bag (oob) estimate of the error rate is also low: 0.63%.  The plot above illustrates how rapidly the error rate drops as the number of trees in the model increases.
+
+Even though cross validation is performed by the randomForest function, we still test our model, rforest, on the data set test (i.e. the 40% of the training set that we partitioned off near the beginning of this report).  This will give us an additional estimate of out of sample error (and an additional cross validation).
+```{r crossvalidation, echo=TRUE, cache=TRUE}
+pred<-predict(rforest, test)
+sum(pred==test$classe)/nrow(test)
+```
+So we see that the model predicts the correct classe 99.45% of the time, or equivalently, the estimated out of sample error rate is 0.55%.  So the model predicts well.
+
+## Results
+
+We used our model to predict the 20 cases in the testing data (using the predict function in R) and submitted the results to Coursera.  All 20 cases were predicted correctly.  (This is unsurprising, given the low estimated out of sample error rate of 0.55%.)
+```{r predictioncoursera, echo=TRUE, cache=TRUE}
+predict(rforest, testing)
+```
+
+
